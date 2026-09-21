@@ -1,0 +1,14 @@
+{
+  "name": "radstyle-models-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "python3 -m http.server 4173 --bind 127.0.0.1 --directory docs",
+    "test": "node --test tests/core.test.js && python3 -m unittest discover -s tests -p 'test_*.py'",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

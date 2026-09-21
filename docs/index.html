@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Compare Qwen3.5-2B generated radiology Impressions with reference Findings and Impressions across datasets and persona groups.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+  <title>RadStyle | Report comparison explorer</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#comparison">Skip to report comparison</a>
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">R</span><span>RADSTYLE <span class="brand-sub">MODEL LAB</span></span></div>
+    <a href="https://github.com/sabyasachis/radstyle-models_dashboard" target="_blank" rel="noreferrer">Source &amp; data <span aria-hidden="true">&#8599;</span></a>
+  </header>
+  <main>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">QWEN3.5-2B &middot; FINDINGS TO IMPRESSION</p>
+        <h1>Compare the reports.<br><span>See what changed.</span></h1>
+        <p class="lede">Explore reference reports alongside untouched baselines and non-thinking fine-tuned models. Every model sees the same Findings, without a persona instruction.</p>
+      </div>
+      <div class="overview" aria-label="Dataset overview">
+        <div><strong id="total-reports">&mdash;</strong><span>test reports</span></div>
+        <div><strong>4</strong><span>model outputs / report</span></div>
+        <div><strong>40 / 10</strong><span>ID / OOD personas</span></div>
+      </div>
+    </section>
+    <details class="protocol">
+      <summary>How to read this dashboard <span class="protocol-tag">Research only</span></summary>
+      <div class="protocol-body">
+        <p><strong>ID/OOD follows the selected test catalog:</strong> ID = persona ranks 1&ndash;40; OOD = ranks 41&ndash;50. Evaluating a model on the other dataset does <strong>not</strong> change this label here. A separate badge identifies cross-dataset models. Base-model pretraining exposure is unknown.</p>
+        <p><strong>Scores:</strong> GREEN measures reference-relative clinical agreement; Style measures agreement on applicable style features; ROUGE-L measures wording overlap; Checks are deterministic reference-relative rules. All scorers compare Impressions only, not Findings. GREEN and Style show mean &plusmn; sample SD across three calls to the same judge, not a confidence interval.</p>
+        <p><strong>Decoding:</strong> this is the original experiment: non-thinking temperature 0.7, top-p 0.8, presence penalty 1.5; thinking 0.6 / 0.95 / 1.5; top-k 20 in both. These are <strong>not Qwen's recommended text settings</strong>. The recommended-text follow-up is not mixed into this release. Trained thinking models are excluded.</p>
+        <p><strong>Public data:</strong> the owner approved these non-identifying, open-dataset-derived records for public release. Underlying source terms still apply. Raw reasoning, judge responses, source-record identifiers, and patient metadata are not published. This site is not a clinical decision tool.</p>
+      </div>
+    </details>
+
+    <div id="error" class="error" role="alert" hidden></div>
+    <p id="status" class="status" role="status" aria-live="polite">Loading report catalog...</p>
+
+    <div class="workspace" id="workspace" hidden>
+      <aside class="sidebar" aria-label="Report filters and selection">
+        <section class="filters panel">
+          <h2>Explore reports</h2>
+          <fieldset>
+            <legend>Test dataset</legend>
+            <div class="segmented" id="dataset-options">
+              <label><input type="radio" name="dataset" value="joint" checked><span>Joined</span></label>
+              <label><input type="radio" name="dataset" value="disjoint"><span>Disjoint</span></label>
+            </div>
+          </fieldset>
+          <label class="field-label" for="partition">Persona group <span class="muted">(test catalog)</span></label>
+          <select id="partition">
+            <option value="all">All 50 personas</option>
+            <option value="id">ID &middot; first 40 personas</option>
+            <option value="ood">OOD &middot; held-out 10 personas</option>
+          </select>
+          <div class="filter-pair">
+            <div><label class="field-label" for="persona">Persona rank</label><select id="persona"><option value="all">All ranks</option></select></div>
+            <div><label class="field-label" for="source">Source</label><select id="source"><option value="all">All sources</option></select></div>
+          </div>
+          <label class="field-label" for="search">Search report text</label>
+          <input id="search" type="search" placeholder="Find a term in any report..." autocomplete="off" maxlength="300">
+          <button id="reset" class="text-button" type="button">Reset filters</button>
+        </section>
+        <section class="case-browser panel">
+          <div class="section-heading"><h2>Reports</h2><span id="match-count" class="count"></span></div>
+          <ul id="case-list" class="case-list" aria-label="Matching reports"></ul>
+          <div class="pagination">
+            <button id="page-prev" type="button" aria-label="Previous page">&#8592;</button>
+            <span id="page-status"></span>
+            <button id="page-next" type="button" aria-label="Next page">&#8594;</button>
+          </div>
+        </section>
+      </aside>
+
+      <section id="comparison" class="comparison" aria-label="Report comparison" tabindex="-1">
+        <div id="empty" class="empty panel" hidden><h2>No matching reports</h2><p>Try another term or reset your filters.</p></div>
+        <div id="case-content">
+          <div class="report-heading">
+            <div><p class="eyebrow" id="case-source"></p><h2 id="case-title"></h2><div id="case-tags" class="tags"></div></div>
+            <div class="case-actions">
+              <button id="case-prev" type="button" aria-label="Previous matching report">&#8592;</button>
+              <button id="case-next" type="button" aria-label="Next matching report">&#8594;</button>
+              <button id="share" type="button">Copy link</button>
+            </div>
+          </div>
+          <div class="reference-grid">
+            <article class="panel reference-card findings-card">
+              <div class="card-heading"><h3>Reference Findings</h3><span class="badge">Model input</span></div>
+              <p class="report-text" id="findings"></p>
+            </article>
+            <article class="panel reference-card">
+              <div class="card-heading"><h3>Reference Impression</h3><span class="badge reference-badge">Target</span></div>
+              <p class="report-text" id="reference"></p>
+              <p class="token-note" id="reference-tokens"></p>
+            </article>
+          </div>
+          <section class="model-selection" aria-label="Visible model outputs">
+            <div class="section-heading"><h2>Generated Impressions</h2><span class="muted">Same report, four models</span></div>
+            <fieldset id="model-options"><legend class="sr-only">Choose models to compare</legend></fieldset>
+          </section>
+          <div id="model-grid" class="model-grid"></div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer>
+    <p>Public research comparison &middot; Qwen3.5-2B &middot; <span id="snapshot-date">Original evaluation snapshot</span></p>
+    <p>All clinical text is rendered as plain text. No analytics, external fonts, or model API calls.</p>
+  </footer>
+</body>
+</html>
