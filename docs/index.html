@@ -20,20 +20,28 @@
       <div>
         <p class="eyebrow">QWEN3.5-2B &middot; FINDINGS TO IMPRESSION</p>
         <h1>Compare the reports.<br><span>See what changed.</span></h1>
-        <p class="lede">Explore reference reports alongside untouched baselines and non-thinking fine-tuned models. Every model sees the same Findings, without a persona instruction.</p>
+        <p class="lede" data-profile="original">Explore reference reports alongside untouched baselines and non-thinking fine-tuned models. Every model sees the same Findings, without a persona instruction.</p>
+        <p class="lede" data-profile="persona" hidden>Explore saved epoch-3 generations with learned persona tokens, matched unconditioned models, and the untouched base. All see the same Findings; conditioned models also receive the displayed persona token. This is not live inference.</p>
       </div>
       <div class="overview" aria-label="Dataset overview">
         <div><strong id="total-reports">&mdash;</strong><span>test reports</span></div>
-        <div><strong>4</strong><span>model outputs / report</span></div>
+        <div><strong id="model-count">4</strong><span>model outputs / report</span></div>
         <div><strong>40 / 10</strong><span>ID / OOD personas</span></div>
       </div>
     </section>
+    <div class="experiment-tabs" role="tablist" aria-label="Experiment">
+      <button type="button" role="tab" id="tab-original" data-experiment="original" aria-selected="true" aria-controls="experiment-panel">Original experiment</button>
+      <button type="button" role="tab" id="tab-persona" data-experiment="persona" aria-selected="false" aria-controls="experiment-panel" tabindex="-1">Persona-token conditioning</button>
+    </div>
+    <div id="experiment-panel" role="tabpanel" aria-labelledby="tab-original">
     <details class="protocol">
       <summary>How to read this dashboard <span class="protocol-tag">Research only</span></summary>
       <div class="protocol-body">
         <p><strong>ID/OOD follows the selected test catalog:</strong> ID = persona ranks 1&ndash;40; OOD = ranks 41&ndash;50. Evaluating a model on the other dataset does <strong>not</strong> change this label here. A separate badge identifies cross-dataset models. Base-model pretraining exposure is unknown.</p>
+        <p data-profile="persona" hidden><strong>Conditioning and actual exposure:</strong> joint and disjoint use distinct persona catalogs. Own-dataset ranks 1&ndash;40 receive their dedicated token; held-out ranks 41&ndash;50 and <em>every</em> cross-dataset report receive <code>&lt;|persona_unknown|&gt;</code>. Cards separately show dataset ID/OOD and persona seen/unseen. Cross-dataset generation combines dataset OOD with unseen personas, even when the report has a catalog-ID label. Identical token strings across models do not identify the same semantic persona.</p>
         <p><strong>Scores:</strong> GREEN measures reference-relative clinical agreement; Style measures agreement on applicable style features; ROUGE-L measures wording overlap; Checks are deterministic reference-relative rules. All scorers compare Impressions only, not Findings. GREEN and Style show mean &plusmn; sample SD across three calls to the same judge, not a confidence interval.</p>
-        <p><strong>Decoding:</strong> this is the original experiment: non-thinking temperature 0.7, top-p 0.8, presence penalty 1.5; thinking 0.6 / 0.95 / 1.5; top-k 20 in both. These are <strong>not Qwen's recommended text settings</strong>. The recommended-text follow-up is not mixed into this release. Trained thinking models are excluded.</p>
+        <p data-profile="original"><strong>Decoding:</strong> this is the original experiment: non-thinking temperature 0.7, top-p 0.8, presence penalty 1.5; thinking 0.6 / 0.95 / 1.5; top-k 20 in both. These are <strong>not Qwen's recommended text settings</strong>. The persona experiment uses a separate tab so the profiles are never mixed. Trained thinking models are excluded.</p>
+        <p data-profile="persona" hidden><strong>Matched comparison:</strong> all five models use non-thinking text decoding: temperature 1, top-p 1, top-k 20, presence penalty 2, min-p 0, repetition penalty 1; maximum 576 Impression tokens. Both conditioned and unconditioned SFT models are final epoch-3 checkpoints (joint step 923; disjoint step 927), not the older selected steps 300/600. Only headline generations appear here, not wrong/unknown-token control ablations. Training used fixed approximately 5% unknown-token dropout. <a href="https://github.com/sabyasachis/radstyle-models/blob/main/artifacts/persona_conditioned_20260922/TEAM_PRESENTATION_HANDOFF_WITH_CIS.md" target="_blank" rel="noreferrer">Experimental setup and aggregate results with confidence intervals</a>.</p>
         <p><strong>Public data:</strong> the owner approved these non-identifying, open-dataset-derived records for public release. Underlying source terms still apply. Raw reasoning, judge responses, source-record identifiers, and patient metadata are not published. This site is not a clinical decision tool.</p>
       </div>
     </details>
@@ -48,7 +56,7 @@
           <fieldset>
             <legend>Test dataset</legend>
             <div class="segmented" id="dataset-options">
-              <label><input type="radio" name="dataset" value="joint" checked><span>Joined</span></label>
+              <label><input type="radio" name="dataset" value="joint" checked><span>Joint</span></label>
               <label><input type="radio" name="dataset" value="disjoint"><span>Disjoint</span></label>
             </div>
           </fieldset>
@@ -100,12 +108,13 @@
             </article>
           </div>
           <section class="model-selection" aria-label="Visible model outputs">
-            <div class="section-heading"><h2>Generated Impressions</h2><span class="muted">Same report, four models</span></div>
-            <fieldset id="model-options"><legend class="sr-only">Choose models to compare</legend></fieldset>
+            <div class="section-heading"><h2>Generated Impressions</h2><span class="muted" id="comparison-note">Same report, 4 models</span></div>
+            <fieldset id="model-options"><legend class="sr-only">Choose models to compare</legend><div id="model-toggles"></div></fieldset>
           </section>
           <div id="model-grid" class="model-grid"></div>
         </div>
       </section>
+    </div>
     </div>
   </main>
   <footer>

@@ -1,10 +1,11 @@
-import {MODEL_IDS, SOURCES, filterCases, modelContext, personaGroup, readState, shareUrl, validateDataset} from "./core.js";
+import {EXPERIMENTS, SOURCES, filterCases, modelContext, personaGroup, readState, shareUrl, validateCatalog, validateDataset} from "./core.js";
 
 const $ = id => document.getElementById(id);
 const state = {...readState(location.search), page: 0, selected: null};
 const pageSize = 25;
 const cache = new Map();
-const visible = new Set(MODEL_IDS);
+const selections = new Map(Object.entries(EXPERIMENTS).map(([id, value]) => [id, new Set(value.modelIds)]));
+let visible = selections.get(state.experiment);
 let data;
 let matches = [];
 let requestVersion = 0;
@@ -29,15 +30,50 @@ async function fetchJson(path) {
   return response.json();
 }
 
-function updateUrl() {
+function updateUrl(push = false) {
   const url = new URL(location.href);
   url.search = "";
+  if (state.experiment === "persona") url.searchParams.set("experiment", "persona");
   url.searchParams.set("dataset", state.dataset);
   if (state.partition !== "all") url.searchParams.set("group", state.partition);
   if (state.persona !== "all") url.searchParams.set("persona", state.persona);
   if (state.source !== "all") url.searchParams.set("source", state.source);
-  if (state.selected) url.searchParams.set("case", state.selected.id);
-  history.replaceState(null, "", url);
+  if (state.caseId) url.searchParams.set("case", state.caseId);
+  if (push) history.pushState(null, "", url);
+  else history.replaceState(null, "", url);
+}
+
+function syncExperiment() {
+  for (const tab of document.querySelectorAll('[role="tab"]')) {
+    const selected = tab.dataset.experiment === state.experiment;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  }
+  $("experiment-panel").setAttribute("aria-labelledby", `tab-${state.experiment}`);
+  document.querySelectorAll("[data-profile]").forEach(element => { element.hidden = element.dataset.profile !== state.experiment; });
+  const count = EXPERIMENTS[state.experiment].modelIds.length;
+  $("model-count").textContent = count;
+  $("comparison-note").textContent = `Same report, ${count} models`;
+  $("model-grid").classList.toggle("persona-profile", state.experiment === "persona");
+  visible = selections.get(state.experiment);
+}
+
+function renderModelOptions() {
+  const fragment = document.createDocumentFragment();
+  for (const model of data.models) {
+    const label = node("label", "model-toggle");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = visible.has(model.id);
+    input.value = model.id;
+    input.addEventListener("change", () => {
+      if (input.checked) visible.add(model.id); else visible.delete(model.id);
+      renderModels();
+    });
+    label.append(input, node("span", "", model.shortLabel));
+    fragment.append(label);
+  }
+  $("model-toggles").replaceChildren(fragment);
 }
 
 function syncFilters() {
@@ -110,10 +146,25 @@ function renderModels() {
     const heading = node("div", "card-heading");
     const title = node("div");
     title.append(node("h3", "", model.label));
-    title.append(node("p", "model-subtitle", model.checkpoint === null ? "Original Qwen3.5-2B weights" : `Selected checkpoint ${model.checkpoint} · trained on 40 personas`));
+    const checkpoint = model.epoch === 3 ? `Final epoch 3 · checkpoint ${model.checkpoint}` : `Selected checkpoint ${model.checkpoint}`;
+    title.append(node("p", "model-subtitle", model.checkpoint === null ? "Original Qwen3.5-2B weights" : `${checkpoint} · trained on 40 personas`));
     const context = modelContext(model, state.dataset);
     heading.append(title, node("span", `badge ${context === "Cross-dataset" ? "cross" : ""}`, context));
-    card.append(heading, node("p", "report-text", output.text));
+    card.append(heading);
+    if (state.experiment === "persona") {
+      const exposures = node("div", "tags exposure-tags");
+      if (model.trainingDataset) {
+        exposures.append(
+          node("span", `badge ${output.datasetExposure === "ood" ? "cross" : "id"}`, output.datasetExposure === "ood" ? "Dataset OOD" : "Dataset ID"),
+          node("span", `badge ${output.personaExposure === "ood" ? "ood" : "id"}`, output.personaExposure === "ood" ? "Persona unseen (OOD)" : "Persona seen (ID)"),
+        );
+      } else exposures.append(node("span", "badge", "Pretraining exposure unknown"));
+      const token = node("p", "conditioning-note");
+      if (output.conditioningToken) token.append("Input token: ", node("code", "", output.conditioningToken));
+      else token.textContent = "No persona token";
+      card.append(exposures, token);
+    }
+    card.append(node("p", "report-text", output.text));
     const scores = node("div", "metrics");
     scores.append(metric("GREEN", output.green.mean, output.green.sd), metric("Style", output.style.mean, output.style.sd),
       metric("ROUGE-L", output.rougeL), metric("Checks", output.checksPassed ? "Pass" : "Flagged"));
@@ -134,7 +185,7 @@ function renderReport() {
   $("case-source").textContent = `${data.label} test set · ${SOURCES[item.source]}`;
   $("case-title").textContent = item.id;
   $("case-tags").replaceChildren(
-    node("span", `badge ${item.personaGroup}`, `${item.personaGroup.toUpperCase()} persona`),
+    node("span", `badge ${item.personaGroup}`, `Catalog ${item.personaGroup.toUpperCase()} persona`),
     node("span", "badge", `Catalog rank ${item.personaRank} / 50`),
   );
   $("findings").textContent = item.findings;
@@ -149,15 +200,31 @@ function renderReport() {
 async function loadDataset() {
   const version = ++requestVersion;
   const dataset = state.dataset;
+  const experiment = state.experiment;
+  const profile = EXPERIMENTS[experiment];
+  const key = `${experiment}:${dataset}`;
+  data = undefined;
+  syncExperiment();
   $("error").hidden = true;
   $("workspace").hidden = true;
-  $("status").textContent = `Loading ${dataset === "joint" ? "joined" : "disjoint"} reports...`;
+  $("snapshot-date").textContent = "Loading experiment...";
+  $("status").textContent = `Loading ${dataset} reports...`;
   try {
-    if (!cache.has(dataset)) cache.set(dataset, validateDataset(await fetchJson(`./data/${dataset}.json`), dataset));
+    const catalogKey = `${experiment}:catalog`;
+    if (!cache.has(catalogKey)) cache.set(catalogKey, validateCatalog(await fetchJson(`${profile.directory}/catalog.json`), experiment));
     if (version !== requestVersion) return;
-    data = cache.get(dataset);
+    if (!cache.has(key)) cache.set(key, validateDataset(await fetchJson(`${profile.directory}/${dataset}.json`), dataset, experiment));
+    if (version !== requestVersion) return;
+    data = cache.get(key);
+    const catalog = cache.get(catalogKey);
+    $("total-reports").textContent = catalog.totalReports.toLocaleString();
+    const date = new Date(experiment === "persona" ? catalog.exportedAt : catalog.snapshotCompletedAt).toISOString().slice(0, 10);
+    $("snapshot-date").textContent = experiment === "persona"
+      ? `Export ${date} · final epoch 3 · non-thinking text decoding`
+      : `Snapshot ${date} · original decoding`;
     state.selected = null;
     state.page = 0;
+    renderModelOptions();
     syncFilters();
     applyFilters(state.caseId);
     $("workspace").hidden = false;
@@ -165,6 +232,28 @@ async function loadDataset() {
     if (version === requestVersion) fail(error);
   }
 }
+
+function selectExperiment(experiment) {
+  if (state.experiment === experiment) return;
+  clearTimeout(searchTimer);
+  state.experiment = experiment;
+  updateUrl(true);
+  loadDataset();
+}
+
+const tabs = [...document.querySelectorAll('[role="tab"]')];
+tabs.forEach((tab, index) => {
+  tab.addEventListener("click", () => selectExperiment(tab.dataset.experiment));
+  tab.addEventListener("keydown", event => {
+    const target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 :
+      event.key === "ArrowRight" ? (index + 1) % tabs.length :
+      event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : null;
+    if (target === null) return;
+    event.preventDefault();
+    tabs[target].focus();
+    selectExperiment(tabs[target].dataset.experiment);
+  });
+});
 
 for (let rank = 1; rank <= 50; rank++) $("persona").append(new Option(`Persona ${rank}`, String(rank)));
 for (const [value, label] of Object.entries(SOURCES)) $("source").append(new Option(label, value));
@@ -219,31 +308,9 @@ $("share").addEventListener("click", async () => {
   }
 });
 window.addEventListener("popstate", () => {
+  clearTimeout(searchTimer);
   Object.assign(state, readState(location.search));
   loadDataset();
 });
 
-async function start() {
-  try {
-    const catalog = await fetchJson("./data/catalog.json");
-    if (catalog.schemaVersion !== 1 || !Array.isArray(catalog.models) ||
-        catalog.models.length !== 4 || !Number.isInteger(catalog.totalReports)) throw new Error("Invalid report catalog");
-    $("total-reports").textContent = catalog.totalReports.toLocaleString();
-    $("snapshot-date").textContent = `Snapshot ${new Date(catalog.snapshotCompletedAt).toISOString().slice(0, 10)} · original decoding`;
-    for (const model of catalog.models) {
-      const label = node("label", "model-toggle");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = true;
-      input.value = model.id;
-      input.addEventListener("change", () => {
-        if (input.checked) visible.add(model.id); else visible.delete(model.id);
-        renderModels();
-      });
-      label.append(input, node("span", "", model.shortLabel));
-      $("model-options").append(label);
-    }
-    await loadDataset();
-  } catch (error) { fail(error); }
-}
-start();
+loadDataset();
